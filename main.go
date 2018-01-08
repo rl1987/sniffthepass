@@ -9,9 +9,23 @@ import (
 	"os"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/layers"
 )
+
+func processPacket(packet gopacket.Packet) {
+	if ip4 := packet.Layer(layers.LayerTypeIPv4); ip4 != nil {
+		if tcp := packet.Layer(layers.LayerTypeTCP); tcp != nil {
+			t, _ := tcp.(*layers.TCP)
+			if t.DstPort == 80 {
+				if app := packet.ApplicationLayer(); app != nil {
+					spew.Dump(ip4, tcp, app)
+				}
+			}
+		}
+	}
+}
 
 func main() {
 	fmt.Println("sniffthepass")
@@ -59,7 +73,7 @@ func main() {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for packet := range(packetSource.Packets()) {
-		spew.Dump(packet)
+		processPacket(packet)
 	}
 }
 
