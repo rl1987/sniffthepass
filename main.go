@@ -2,25 +2,39 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 	"os"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/layers"
 )
 
 func processPacket(packet gopacket.Packet) {
-	if ip4 := packet.Layer(layers.LayerTypeIPv4); ip4 != nil {
+	// FIXME: too nested
+	if ip := packet.Layer(layers.LayerTypeIPv4); ip != nil {
+		ip4, _ := ip.(*layers.IPv4)
 		if tcp := packet.Layer(layers.LayerTypeTCP); tcp != nil {
 			t, _ := tcp.(*layers.TCP)
 			if t.DstPort == 80 {
 				if app := packet.ApplicationLayer(); app != nil {
-					spew.Dump(ip4, tcp, app)
+					str := string(app.Payload())
+					lines := strings.Split(str, "\r\n")
+
+					for _, l := range(lines) {
+						if strings.HasPrefix(l, "Authorization: Basic ") == true {
+							b := strings.TrimPrefix(l, "Authorization: Basic ")
+
+							if secret, err := base64.StdEncoding.DecodeString(b); err == nil {
+								fmt.Printf("%v - > %v : %s\n", ip4.SrcIP, ip4.DstIP, secret)
+								break
+							}
+						}
+					}
 				}
 			}
 		}
