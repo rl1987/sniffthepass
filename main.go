@@ -5,38 +5,43 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
-	"os"
 
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 )
 
+func processHTTPPayload(ip4 *layers.IPv4, payload []byte) {
+	str := string(payload)
+	lines := strings.Split(str, "\r\n")
+
+	for _, l := range lines {
+		if strings.HasPrefix(l, "Authorization: Basic ") == true {
+			b := strings.TrimPrefix(l, "Authorization: Basic ")
+
+			if secret, err := base64.StdEncoding.DecodeString(b); err == nil {
+				fmt.Printf("%v - > %v : %s\n", ip4.SrcIP, ip4.DstIP, secret)
+				break
+			}
+		}
+	}
+}
+
+func processTCPSegment(ip4 *layers.IPv4, t *layers.TCP) {
+	if t.DstPort == 80 {
+		processHTTPPayload(ip4, t.Payload)
+	}
+}
+
 func processPacket(packet gopacket.Packet) {
-	// FIXME: too nested
 	if ip := packet.Layer(layers.LayerTypeIPv4); ip != nil {
 		ip4, _ := ip.(*layers.IPv4)
 		if tcp := packet.Layer(layers.LayerTypeTCP); tcp != nil {
 			t, _ := tcp.(*layers.TCP)
-			if t.DstPort == 80 {
-				if app := packet.ApplicationLayer(); app != nil {
-					str := string(app.Payload())
-					lines := strings.Split(str, "\r\n")
-
-					for _, l := range(lines) {
-						if strings.HasPrefix(l, "Authorization: Basic ") == true {
-							b := strings.TrimPrefix(l, "Authorization: Basic ")
-
-							if secret, err := base64.StdEncoding.DecodeString(b); err == nil {
-								fmt.Printf("%v - > %v : %s\n", ip4.SrcIP, ip4.DstIP, secret)
-								break
-							}
-						}
-					}
-				}
-			}
+			processTCPSegment(ip4, t)
 		}
 	}
 }
@@ -54,10 +59,10 @@ func main() {
 		log.Fatal("No network interfaces found")
 	}
 
-	for i, intf := range(netInfs) {
+	for i, intf := range netInfs {
 		fmt.Printf("%d. %s\n", i, intf.Name)
 
-		for _, addr := range(intf.Addresses) {
+		for _, addr := range intf.Addresses {
 			fmt.Printf("%s/%s\n", addr.IP, addr.Netmask)
 		}
 
@@ -86,8 +91,7 @@ func main() {
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
-	for packet := range(packetSource.Packets()) {
+	for packet := range packetSource.Packets() {
 		processPacket(packet)
 	}
 }
-
